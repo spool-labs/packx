@@ -3,6 +3,7 @@ name = "packx"
 version = "0.1.0"
 edition = "2021"
 
+license = "Apache-2.0"
 homepage = "https://tapedrive.io"
 description = "Your data, permanently recorded — uncensorable, uneditable, and here for good."
 repository = "https://github.com/tapedrive-io/packx"
