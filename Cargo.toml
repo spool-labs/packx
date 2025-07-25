@@ -3,6 +3,12 @@ name = "packx"
 version = "0.1.0"
 edition = "2021"
 
+homepage = "https://tapedrive.io"
+description = "Your data, permanently recorded — uncensorable, uneditable, and here for good."
+repository = "https://github.com/tapedrive-io/packx"
+readme = "./README.md"
+keywords = ["solana", "crypto", "mining"]
+
 [dependencies]
 sha3 = "0.10.8"
 rand = "0.8.5"
