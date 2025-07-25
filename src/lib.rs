@@ -1,8 +1,8 @@
-use rayon::prelude::*;
 use sha3::{Digest, Keccak256};
 use rand::Rng;
+use rayon::prelude::*;
 
-pub fn get_commitment(seed: &u64, nonces: &[u16]) -> [u8; 32] {
+pub fn get_commitment(seed: &u64, nonces: &[u32]) -> [u8; 32] {
     let mut hasher = Keccak256::new();
     hasher.update(seed.to_le_bytes());
     for nonce in nonces {
@@ -11,48 +11,42 @@ pub fn get_commitment(seed: &u64, nonces: &[u16]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub fn serialize(seed: u64, nonces: &[u16]) -> [u8; 200] {
+pub fn serialize(seed: u64, nonces: &[u32]) -> [u8; 200] {
     let mut packed = [0u8; 200];
     packed[0..8].copy_from_slice(&seed.to_le_bytes());
-    for i in 0..64 {
-        let nonce1 = nonces[2 * i];
-        let nonce2 = nonces[2 * i + 1];
-        let combined = (nonce1 as u32) | ((nonce2 as u32) << 12);
-        let bytes = combined.to_le_bytes();
-        packed[8 + i * 3..8 + (i + 1) * 3].copy_from_slice(&bytes[0..3]);
+    for (i, &nonce) in nonces.iter().enumerate().take(64) {
+        let nonce_bytes = nonce.to_le_bytes();
+        packed[8 + i * 3..8 + (i + 1) * 3].copy_from_slice(&nonce_bytes[0..3]);
     }
     packed
 }
 
-pub fn deserialize(packed: &[u8; 200]) -> (u64, Vec<u16>) {
+pub fn deserialize(packed: &[u8; 200]) -> (u64, Vec<u32>) {
     let seed = u64::from_le_bytes(packed[0..8].try_into().unwrap());
-    let mut nonces = Vec::with_capacity(128);
+    let mut nonces = Vec::with_capacity(64);
     for i in 0..64 {
         let start = 8 + i * 3;
-        let mut bytes = [0u8; 4];
-        bytes[0..3].copy_from_slice(&packed[start..start + 3]);
-        let combined = u32::from_le_bytes(bytes);
-        let nonce1 = (combined & 0xFFF) as u16;
-        let nonce2 = (combined >> 12) as u16;
-        nonces.push(nonce1);
-        nonces.push(nonce2);
+        let mut nonce_bytes = [0u8; 4];
+        nonce_bytes[0..3].copy_from_slice(&packed[start..start + 3]);
+        let nonce = u32::from_le_bytes(nonce_bytes);
+        nonces.push(nonce);
     }
     (seed, nonces)
 }
 
-pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> (u64, Vec<u16>) {
-    let max_nonce: u16 = (1 << 12) - 1; // u12: 0 to 4095
+pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> (u64, Vec<u32>) {
+    let max_nonce: u32 = (1 << 24) - 1; // u24: 0 to 16777215
     let mut seed: u64 = rand::thread_rng().r#gen();
-    let mut nonces = Vec::with_capacity(128);
+    let mut nonces = Vec::with_capacity(64);
 
     loop {
         nonces.clear();
         // Parallelize chunk processing
-        let results: Vec<Option<u16>> = (0..128)
+        let results: Vec<Option<u32>> = (0..64)
             .into_par_iter()
             .map(|chunk_idx| {
-                let offset = chunk_idx;
-                let target = &data[offset..offset + 1];
+                let offset = chunk_idx * 2;
+                let target = &data[offset..offset + 2];
                 for nonce in 0..=max_nonce {
                     let mut hasher = Keccak256::new();
                     hasher.update(pubkey);
@@ -60,7 +54,7 @@ pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> (u64, Vec<u16>) {
                     hasher.update(nonce.to_le_bytes());
                     hasher.update((chunk_idx as u64).to_le_bytes());
                     let hash = hasher.finalize();
-                    if hash[0..1] == *target {
+                    if hash[0..2] == *target {
                         return Some(nonce);
                     }
                 }
@@ -85,7 +79,7 @@ pub fn verify(
     commitment: Option<&[u8; 32]>,
 ) -> bool {
     let (seed, nonces) = deserialize(packed);
-    if nonces.len() != 128 {
+    if nonces.len() != 64 {
         return false;
     }
     if let Some(comm) = commitment {
@@ -94,23 +88,21 @@ pub fn verify(
             return false;
         }
     }
-    for chunk_idx in 0..128 {
-        let offset = chunk_idx;
-        let target = &data[offset..offset + 1];
+    for chunk_idx in 0..64 {
+        let offset = chunk_idx * 2;
+        let target = &data[offset..offset + 2];
         let mut hasher = Keccak256::new();
         hasher.update(pubkey);
         hasher.update(seed.to_le_bytes());
         hasher.update(nonces[chunk_idx].to_le_bytes());
         hasher.update((chunk_idx as u64).to_le_bytes());
         let hash = hasher.finalize();
-        if hash[0..1] != *target {
+        if hash[0..2] != *target {
             return false;
         }
     }
     true
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -135,9 +127,9 @@ mod tests {
     fn test_serialize_deserialize_roundtrip() {
         let mut rng = rand::thread_rng();
         let seed = rng.gen::<u64>();
-        let mut nonces = vec![0u16; 128];
+        let mut nonces = vec![0u32; 64];
         for nonce in nonces.iter_mut() {
-            *nonce = rng.gen_range(0..=(1 << 12) - 1);
+            *nonce = rng.gen_range(0..=(1 << 24) - 1);
         }
 
         let packed = serialize(seed, &nonces);
@@ -151,8 +143,10 @@ mod tests {
     fn test_commitment_consistency() {
         let mut rng = rand::thread_rng();
         let seed = rng.gen::<u64>();
-        let mut nonces = vec![0u16; 128];
-        rng.fill(&mut nonces[..]);
+        let mut nonces = vec![0u32; 64];
+        for nonce in nonces.iter_mut() {
+            *nonce = rng.gen_range(0..=(1 << 24) - 1);
+        }
 
         let commitment1 = get_commitment(&seed, &nonces);
         let commitment2 = get_commitment(&seed, &nonces);
@@ -172,7 +166,7 @@ mod tests {
         let packed = serialize(seed, &nonces);
         let commitment = get_commitment(&seed, &nonces);
 
-        let mut wrong_data = data.clone();
+        let mut wrong_data = data;
         wrong_data[0] ^= 1; // Flip a bit in data
 
         assert!(!verify(&pubkey, &wrong_data, &packed, Some(&commitment)));
@@ -190,7 +184,7 @@ mod tests {
         let packed = serialize(seed, &nonces);
         let commitment = get_commitment(&seed, &nonces);
 
-        let mut wrong_pubkey = pubkey.clone();
+        let mut wrong_pubkey = pubkey;
         wrong_pubkey[0] ^= 1; // Flip a bit in pubkey
 
         assert!(!verify(&wrong_pubkey, &data, &packed, Some(&commitment)));
