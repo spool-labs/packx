@@ -8,8 +8,8 @@ use solana_program::keccak;
 #[cfg(not(feature = "solana"))]
 use sha3::{Digest, Keccak256};
 
-#[repr(C, packed)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Solution {
     seed: [u8; 8],
     nonces: [[u8; 3]; 64],
