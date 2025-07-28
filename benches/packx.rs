@@ -11,18 +11,18 @@ fn bench_packx_and_verify(c: &mut Criterion) {
 
     c.bench_function("packx", |b| {
         b.iter(|| {
-            let (seed, nonces) = packx(&pubkey, &data);
-            let _ = serialize(seed, &nonces); // Include serialization in benchmark
+            let packed = packx(&pubkey, &data);
+            let _ = serialize(&packed);
         })
     });
 
-    let (seed, nonces) = packx(&pubkey, &data);
-    let packed_bytes = serialize(seed, &nonces);
-    let commitment = get_commitment(&seed, &nonces);
+    let packed = packx(&pubkey, &data);
+    let _packed_bytes = serialize(&packed);
+    let commitment = get_commitment(&packed);
 
     c.bench_function("verify", |b| {
         b.iter(|| {
-            verify(&pubkey, &data, &packed_bytes, Some(&commitment));
+            verify(&pubkey, &data, &packed, Some(&commitment));
         })
     });
 }

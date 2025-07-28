@@ -16,7 +16,7 @@ pub fn get_commitment(packed: &Solution) -> [u8; 32] {
     for nonce_bytes in packed.nonces.iter() {
         let mut nonce_full = [0u8; 4];
         nonce_full[0..3].copy_from_slice(nonce_bytes);
-        hasher.update(&nonce_full);
+        hasher.update(nonce_full);
     }
     hasher.finalize().into()
 }
@@ -108,7 +108,7 @@ pub fn verify(
         hasher.update(packed.seed);
         let mut nonce_bytes = [0u8; 4];
         nonce_bytes[0..3].copy_from_slice(&packed.nonces[chunk_idx]);
-        hasher.update(&nonce_bytes);
+        hasher.update(nonce_bytes);
         hasher.update((chunk_idx as u64).to_le_bytes());
         let hash = hasher.finalize();
         if hash[0..2] != *target {
