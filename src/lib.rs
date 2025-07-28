@@ -1,48 +1,62 @@
+use rayon::prelude::*;
+use bytemuck::{Pod, Zeroable};
 use sha3::{Digest, Keccak256};
 use rand::Rng;
-use rayon::prelude::*;
 
-pub fn get_commitment(seed: &u64, nonces: &[u32]) -> [u8; 32] {
+#[repr(C, packed)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct Solution {
+    seed: [u8; 8],
+    nonces: [[u8; 3]; 64],
+}
+
+pub fn get_commitment(packed: &Solution) -> [u8; 32] {
     let mut hasher = Keccak256::new();
-    hasher.update(seed.to_le_bytes());
-    for nonce in nonces {
-        hasher.update(nonce.to_le_bytes());
+    hasher.update(packed.seed); // seed is already [u8; 8]
+    for nonce_bytes in packed.nonces.iter() {
+        let mut nonce_full = [0u8; 4];
+        nonce_full[0..3].copy_from_slice(nonce_bytes);
+        hasher.update(&nonce_full);
     }
     hasher.finalize().into()
 }
 
-pub fn serialize(seed: u64, nonces: &[u32]) -> [u8; 200] {
-    let mut packed = [0u8; 200];
-    packed[0..8].copy_from_slice(&seed.to_le_bytes());
-    for (i, &nonce) in nonces.iter().enumerate().take(64) {
-        let nonce_bytes = nonce.to_le_bytes();
-        packed[8 + i * 3..8 + (i + 1) * 3].copy_from_slice(&nonce_bytes[0..3]);
-    }
-    packed
+pub fn serialize(packed: &Solution) -> [u8; 200] {
+    let bytes = bytemuck::bytes_of(packed);
+    let mut result = [0u8; 200];
+    result.copy_from_slice(bytes);
+    result
 }
 
-pub fn deserialize(packed: &[u8; 200]) -> (u64, Vec<u32>) {
-    let seed = u64::from_le_bytes(packed[0..8].try_into().unwrap());
+pub fn deserialize(packed: &[u8; 200]) -> Solution {
+    let mut result = Solution {
+        seed: [0; 8],
+        nonces: [[0; 3]; 64],
+    };
+    let bytes = bytemuck::bytes_of_mut(&mut result);
+    bytes.copy_from_slice(packed);
+    result
+}
+
+pub fn to_seed_and_nonces(packed: &Solution) -> (u64, Vec<u32>) {
+    let seed = u64::from_le_bytes(packed.seed);
     let mut nonces = Vec::with_capacity(64);
-    for i in 0..64 {
-        let start = 8 + i * 3;
-        let mut nonce_bytes = [0u8; 4];
-        nonce_bytes[0..3].copy_from_slice(&packed[start..start + 3]);
-        let nonce = u32::from_le_bytes(nonce_bytes);
-        nonces.push(nonce);
+    for nonce_bytes in packed.nonces.iter() {
+        let mut nonce_full = [0u8; 4];
+        nonce_full[0..3].copy_from_slice(nonce_bytes);
+        nonces.push(u32::from_le_bytes(nonce_full));
     }
     (seed, nonces)
 }
 
-pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> (u64, Vec<u32>) {
+pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> Solution {
     let max_nonce: u32 = (1 << 24) - 1; // u24: 0 to 16777215
-    let mut seed: u64 = rand::thread_rng().r#gen();
-    let mut nonces = Vec::with_capacity(64);
+    let mut seed: u64 = rand::thread_rng().gen();
+    let mut result = Solution { seed: [0; 8], nonces: [[0; 3]; 64] };
 
     loop {
-        nonces.clear();
-        // Parallelize chunk processing
-        let results: Vec<Option<u32>> = (0..64)
+        result.seed = seed.to_le_bytes();
+        let nonces: Vec<Option<u32>> = (0..64)
             .into_par_iter()
             .map(|chunk_idx| {
                 let offset = chunk_idx * 2;
@@ -62,28 +76,26 @@ pub fn packx(pubkey: &[u8; 32], data: &[u8; 128]) -> (u64, Vec<u32>) {
             })
             .collect();
 
-        // Check if all chunks have a matching nonce
-        if results.iter().all(|r| r.is_some()) {
-            nonces.extend(results.into_iter().map(|r| r.unwrap()));
+        if nonces.iter().all(|r| r.is_some()) {
+            for (i, nonce) in nonces.into_iter().enumerate() {
+                let nonce_bytes = nonce.unwrap().to_le_bytes();
+                result.nonces[i].copy_from_slice(&nonce_bytes[0..3]);
+            }
             break;
         }
         seed = seed.wrapping_add(1);
     }
-    (seed, nonces)
+    result
 }
 
 pub fn verify(
     pubkey: &[u8; 32],
     data: &[u8; 128],
-    packed: &[u8; 200],
+    packed: &Solution,
     commitment: Option<&[u8; 32]>,
 ) -> bool {
-    let (seed, nonces) = deserialize(packed);
-    if nonces.len() != 64 {
-        return false;
-    }
     if let Some(comm) = commitment {
-        let computed_comm = get_commitment(&seed, &nonces);
+        let computed_comm = get_commitment(packed);
         if computed_comm != *comm {
             return false;
         }
@@ -93,8 +105,10 @@ pub fn verify(
         let target = &data[offset..offset + 2];
         let mut hasher = Keccak256::new();
         hasher.update(pubkey);
-        hasher.update(seed.to_le_bytes());
-        hasher.update(nonces[chunk_idx].to_le_bytes());
+        hasher.update(packed.seed);
+        let mut nonce_bytes = [0u8; 4];
+        nonce_bytes[0..3].copy_from_slice(&packed.nonces[chunk_idx]);
+        hasher.update(&nonce_bytes);
         hasher.update((chunk_idx as u64).to_le_bytes());
         let hash = hasher.finalize();
         if hash[0..2] != *target {
@@ -107,7 +121,7 @@ pub fn verify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
+    use rand::*;
 
     #[test]
     fn test_packx_and_verify() {
@@ -117,9 +131,8 @@ mod tests {
         let mut data = [0u8; 128];
         rng.fill_bytes(&mut data);
 
-        let (seed, nonces) = packx(&pubkey, &data);
-        let packed = serialize(seed, &nonces);
-        let commitment = get_commitment(&seed, &nonces);
+        let packed = packx(&pubkey, &data);
+        let commitment = get_commitment(&packed);
         assert!(verify(&pubkey, &data, &packed, Some(&commitment)));
     }
 
@@ -127,29 +140,31 @@ mod tests {
     fn test_serialize_deserialize_roundtrip() {
         let mut rng = rand::thread_rng();
         let seed = rng.gen::<u64>();
-        let mut nonces = vec![0u32; 64];
-        for nonce in nonces.iter_mut() {
-            *nonce = rng.gen_range(0..=(1 << 24) - 1);
+        let mut packed = Solution { seed: seed.to_le_bytes(), nonces: [[0; 3]; 64] };
+        for nonce in packed.nonces.iter_mut() {
+            let n : u32 = rng.gen_range(0..=(1 << 24) - 1);
+            nonce.copy_from_slice(&n.to_le_bytes()[0..3]);
         }
 
-        let packed = serialize(seed, &nonces);
-        let (deserialized_seed, deserialized_nonces) = deserialize(&packed);
+        let serialized = serialize(&packed);
+        let deserialized = deserialize(&serialized);
 
-        assert_eq!(seed, deserialized_seed);
-        assert_eq!(nonces, deserialized_nonces);
+        assert_eq!(packed.seed, deserialized.seed);
+        assert_eq!(packed.nonces, deserialized.nonces);
     }
 
     #[test]
     fn test_commitment_consistency() {
         let mut rng = rand::thread_rng();
         let seed = rng.gen::<u64>();
-        let mut nonces = vec![0u32; 64];
-        for nonce in nonces.iter_mut() {
-            *nonce = rng.gen_range(0..=(1 << 24) - 1);
+        let mut packed = Solution { seed: seed.to_le_bytes(), nonces: [[0; 3]; 64] };
+        for nonce in packed.nonces.iter_mut() {
+            let n : u32 = rng.gen_range(0..=(1 << 24) - 1);
+            nonce.copy_from_slice(&n.to_le_bytes()[0..3]);
         }
 
-        let commitment1 = get_commitment(&seed, &nonces);
-        let commitment2 = get_commitment(&seed, &nonces);
+        let commitment1 = get_commitment(&packed);
+        let commitment2 = get_commitment(&packed);
 
         assert_eq!(commitment1, commitment2);
     }
@@ -162,9 +177,8 @@ mod tests {
         let mut data = [0u8; 128];
         rng.fill_bytes(&mut data);
 
-        let (seed, nonces) = packx(&pubkey, &data);
-        let packed = serialize(seed, &nonces);
-        let commitment = get_commitment(&seed, &nonces);
+        let packed = packx(&pubkey, &data);
+        let commitment = get_commitment(&packed);
 
         let mut wrong_data = data;
         wrong_data[0] ^= 1; // Flip a bit in data
@@ -180,9 +194,8 @@ mod tests {
         let mut data = [0u8; 128];
         rng.fill_bytes(&mut data);
 
-        let (seed, nonces) = packx(&pubkey, &data);
-        let packed = serialize(seed, &nonces);
-        let commitment = get_commitment(&seed, &nonces);
+        let packed = packx(&pubkey, &data);
+        let commitment = get_commitment(&packed);
 
         let mut wrong_pubkey = pubkey;
         wrong_pubkey[0] ^= 1; // Flip a bit in pubkey
@@ -198,9 +211,8 @@ mod tests {
         let mut data = [0u8; 128];
         rng.fill_bytes(&mut data);
 
-        let (seed, nonces) = packx(&pubkey, &data);
-        let packed = serialize(seed, &nonces);
-        let mut wrong_commitment = get_commitment(&seed, &nonces);
+        let packed = packx(&pubkey, &data);
+        let mut wrong_commitment = get_commitment(&packed);
         wrong_commitment[0] ^= 1; // Flip a bit in commitment
 
         assert!(!verify(&pubkey, &data, &packed, Some(&wrong_commitment)));
@@ -213,9 +225,8 @@ mod tests {
         rng.fill_bytes(&mut pubkey);
         let data = [0u8; 128];
 
-        let (seed, nonces) = packx(&pubkey, &data);
-        let packed = serialize(seed, &nonces);
-        let commitment = get_commitment(&seed, &nonces);
+        let packed = packx(&pubkey, &data);
+        let commitment = get_commitment(&packed);
 
         assert!(verify(&pubkey, &data, &packed, Some(&commitment)));
     }

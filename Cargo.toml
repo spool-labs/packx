@@ -14,6 +14,7 @@ keywords = ["solana", "crypto", "mining"]
 sha3 = "0.10.8"
 rand = "0.8.5"
 rayon = "1.10.0"
+bytemuck = { version = "1.14", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.5.1"
