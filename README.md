@@ -4,25 +4,27 @@ PackX is a Rust library for cryptographically committing 128‑byte data segment
 
 ## Usage
 
-- `packx(pubkey, data)` — generate a seed and 128 nonces
-- `serialize(seed, nonces)` — convert the result into a 200-byte array
-- `verify(pubkey, data, packed, commitment)` — check integrity of the reconstruction
+- `solve_with_seed(pubkey, data, seed)` - generate a solution containing a seed and 64 nonces for a 128-byte data segment.
+- `verify(pubkey, data, packed, commitment)` - verify the solution against the public key and data segment.
 
-Store the `packed` result and `commitment` in a Merkle tree for efficient proof and verification.
+Store the packed result (from serialize) in a Merkle tree for efficient proof and verification. The find_nonce_for_chunk function allows external parallelization of nonce searches for performance optimization.
 
 ## Example
 
 ```rust
-use packx::{packx, serialize, get_commitment, verify};
+let pubkey = [1u8; 32]; // Example pubkey
+let data = [42u8; 128]; // Example data
+let mut seed = rng.gen::<u64>();
 
-let pubkey = rand::random::<[u8;32]>();
-let data   = rand::random::<[u8;128]>();
+// Find a solution by trying seeds until one works
+let solution = loop {
+    if let Some(sol) = solve_with_seed(&pubkey, &data, seed) {
+        break sol;
+    }
+    seed = seed.wrapping_add(1);
+};
 
-let (seed, nonces) = packx(&pubkey, &data);
-let packed         = serialize(seed, &nonces);
-let commit         = get_commitment(&seed, &nonces);
-
-assert!(verify(&pubkey, &data, &packed, Some(&commit)));
+assert!(verify(&pubkey, &data, &solution));
 ```
 
 ## Notes
