@@ -22,6 +22,10 @@ impl Solution {
     pub fn from_bytes(data: &[u8; 152]) -> Self {
         deserialize(data)
     }
+
+    pub fn unpack(&self, pubkey: &[u8; 32]) -> [u8; 128] {
+        unpack(pubkey, self)
+    }
 }
 
 /// Reconstructs the data from the solution and public key.
