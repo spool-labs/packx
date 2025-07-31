@@ -4,9 +4,9 @@ PackX is a Rust library for cryptographically committing 128-byte data segments 
 
 ## Usage
 
-`solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Solution>` - Generate a solution containing a u64 bump, 16 u8 seeds, and 128 u8 nonces for a 128-byte data segment, meeting the specified difficulty (leading zeros in the hash of the serialized solution).
-`verify(pubkey: &[u8; 32], data: &[u8; 128], solution: &Solution, difficulty: u32)` -> bool - Verify the solution against the public key, data segment, and difficulty.
-`unpack(pubkey: &[u8; 32], solution: &Solution) -> [u8; 128]` - Reconstruct the original data from the solution and public key.
+- `solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Solution>` - Generate a solution containing a u64 bump, 16 u8 seeds, and 128 u8 nonces for a 128-byte data segment, meeting the specified difficulty (leading zeros in the hash of the serialized solution).
+- `verify(pubkey: &[u8; 32], data: &[u8; 128], solution: &Solution, difficulty: u32)` -> bool - Verify the solution against the public key, data segment, and difficulty.
+- `unpack(pubkey: &[u8; 32], solution: &Solution) -> [u8; 128]` - Reconstruct the original data from the solution and public key.
 
 Store the serialized solution (152 bytes) in a Merkle tree for efficient proof and verification. The find_nonce function allows external parallelization of nonce searches for performance optimization, and the u64 bump field expands the search space for meeting difficulty requirements.
 
@@ -39,4 +39,4 @@ assert_eq!(unpacked_data, data);
 - **Storage overhead**: `152 bytes` per `128-byte segment` (~1.1875:1 ratio).
 - **Difficulty**: The difficulty is the number of leading zeros in the Keccak256 hash of the serialized solution (152 bytes). Higher difficulties require more computation to find a valid solution.
 - **Parallelization**: The library supports parallel nonce searches via `find_nonce` and `solve_with_seed`, which can be used with libraries like Rayon for performance optimization.
-- **Solana Compatibility: The library uses a `compute_hash` function that supports both `Solana’s keccak::hashv` (with the solana feature) and the `sha3` crate for non-Solana environments.
+- **Solana Compatibility**: The library uses a `compute_hash` function that supports both `Solana’s keccak::hashv` (with the solana feature) and the `sha3` crate for non-Solana environments.

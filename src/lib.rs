@@ -25,7 +25,7 @@ impl Solution {
 }
 
 /// Reconstructs the data from the solution and public key.
-pub fn reconstruct_data(pubkey: &[u8; 32], solution: &Solution) -> [u8; 128] {
+pub fn unpack(pubkey: &[u8; 32], solution: &Solution) -> [u8; 128] {
     let mut data = [0u8; 128];
     for group_idx in 0..16 {
         let chunk_start = group_idx * 8;
@@ -142,7 +142,7 @@ pub fn solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Sol
 /// Verifies a solution against the provided public key, data, and difficulty.
 pub fn verify(pubkey: &[u8; 32], data: &[u8; 128], solution: &Solution, difficulty: u32) -> bool {
     // Check data reconstruction
-    let reconstructed_data = reconstruct_data(pubkey, solution);
+    let reconstructed_data = unpack(pubkey, solution);
     if reconstructed_data != *data {
         return false;
     }
@@ -302,7 +302,7 @@ mod tests {
         rng.fill_bytes(&mut data);
 
         let solution = solve(&pubkey, &data, TEST_DIFFICULTY).expect("Failed to find solution");
-        let reconstructed_data = reconstruct_data(&pubkey, &solution);
+        let reconstructed_data = unpack(&pubkey, &solution);
 
         assert_eq!(reconstructed_data, data);
     }
