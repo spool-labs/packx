@@ -17,6 +17,14 @@ pub struct Solution {
 }
 
 impl Solution {
+    pub fn new(seeds: [u8; 16], nonces: [u8; 128], bump: [u8; 8]) -> Self {
+        Solution {
+            bump,
+            seeds,
+            nonces,
+        }
+    }
+
     pub fn to_bytes(&self) -> [u8; SOLUTION_SIZE] {
         serialize(self)
     }
