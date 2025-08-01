@@ -6,6 +6,8 @@ use sha3::{Digest, Keccak256};
 #[cfg(feature = "solana")]
 use solana_program::keccak;
 
+pub const SOLUTION_SIZE: usize = 152; // 8 + 16 + 128 = 152 bytes
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Solution {
@@ -15,11 +17,11 @@ pub struct Solution {
 }
 
 impl Solution {
-    pub fn to_bytes(&self) -> [u8; 152] {
+    pub fn to_bytes(&self) -> [u8; SOLUTION_SIZE] {
         serialize(self)
     }
 
-    pub fn from_bytes(data: &[u8; 152]) -> Self {
+    pub fn from_bytes(data: &[u8; SOLUTION_SIZE]) -> Self {
         deserialize(data)
     }
 
@@ -157,16 +159,16 @@ pub fn verify(pubkey: &[u8; 32], data: &[u8; 128], solution: &Solution, difficul
     get_difficulty(hash) >= difficulty
 }
 
-/// Serializes a `Solution` struct into a byte array of length 152.
-pub fn serialize(solution: &Solution) -> [u8; 152] {
+/// Serializes a `Solution` struct into a byte array of length SOLUTION_SIZE.
+pub fn serialize(solution: &Solution) -> [u8; SOLUTION_SIZE] {
     let bytes = bytemuck::bytes_of(solution);
-    let mut result = [0u8; 152];
+    let mut result = [0u8; SOLUTION_SIZE];
     result.copy_from_slice(bytes);
     result
 }
 
 /// Deserializes a byte array into a `Solution` struct.
-pub fn deserialize(solution: &[u8; 152]) -> Solution {
+pub fn deserialize(solution: &[u8; SOLUTION_SIZE]) -> Solution {
     let mut result = Solution {
         bump: [0; 8],
         seeds: [0; 16],
