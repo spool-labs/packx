@@ -36,6 +36,12 @@ impl Solution {
     pub fn unpack(&self, pubkey: &[u8; 32]) -> [u8; 128] {
         unpack(pubkey, self)
     }
+
+    pub fn difficulty(&self) -> u32 {
+        let solution_bytes = self.to_bytes();
+        let hash = compute_hash(&[&solution_bytes]);
+        get_difficulty(hash)
+    }
 }
 
 /// Reconstructs the data from the solution and public key.
@@ -137,10 +143,7 @@ pub fn solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Sol
         }
 
         if found {
-            // Check difficulty
-            let solution_bytes = serialize(&result);
-            let hash = compute_hash(&[&solution_bytes]);
-            if get_difficulty(hash) >= difficulty {
+            if result.difficulty() >= difficulty {
                 return Some(result);
             }
         }
@@ -305,6 +308,20 @@ mod tests {
 
         // Verify with higher difficulty should fail
         assert!(!verify(&pubkey, &data, &solution, TEST_DIFFICULTY + 8));
+    }
+
+    #[test]
+    fn test_get_difficulty() {
+        let mut rng = rand::thread_rng();
+        let mut pubkey = [0u8; 32];
+        let mut data = [0u8; 128];
+        rng.fill_bytes(&mut pubkey);
+        rng.fill_bytes(&mut data);
+
+        let solution = solve(&pubkey, &data, TEST_DIFFICULTY).expect("Failed to find solution");
+        let difficulty = solution.difficulty();
+
+        assert!(difficulty >= TEST_DIFFICULTY);
     }
 
     #[test]
