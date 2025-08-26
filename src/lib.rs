@@ -1,11 +1,5 @@
 use bytemuck::{Pod, Zeroable};
 
-#[cfg(not(feature = "solana"))]
-use sha3::{Digest, Keccak256};
-
-#[cfg(feature = "solana")]
-use solana_program::keccak;
-
 pub const SOLUTION_SIZE: usize = 152; // 8 + 16 + 128 = 152 bytes
 
 #[repr(C)]
@@ -107,8 +101,17 @@ pub fn solve_with_seed(
 }
 
 /// Constructs a solution by finding nonces for all chunks, meeting the difficulty.
+/// If difficulty is 0, store data directly in nonces with bump and seeds set to zero.
 pub fn solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Solution> {
-    let mut bump = 0u64;
+    if difficulty == 0 {
+        return Some(Solution {
+            bump: [0; 8],    // Set bump to zero (u64: 0)
+            seeds: [0; 16],  // Set seeds to zero
+            nonces: *data,   // Store data directly in nonces
+        });
+    }
+
+    let mut bump = 1u64; // Start at bump = 1 for non-zero difficulty
 
     loop {
         let bump_bytes = bump.to_le_bytes();
@@ -151,13 +154,17 @@ pub fn solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Sol
         // Try next bump value
         bump = bump.wrapping_add(1);
         if bump == 0 {
-            return None; // Exhausted all bump values
+            return None; // Exhausted all bump values (skipping 0)
         }
     }
 }
 
 /// Verifies a solution against the provided public key, data, and difficulty.
 pub fn verify(pubkey: &[u8; 32], data: &[u8; 128], solution: &Solution, difficulty: u32) -> bool {
+    if difficulty == 0 {
+        return solution.nonces == *data && solution.bump == [0; 8] && solution.seeds == [0; 16];
+    }
+
     // Check data reconstruction
     let reconstructed_data = unpack(pubkey, solution);
     if reconstructed_data != *data {
@@ -204,15 +211,15 @@ fn get_difficulty(hash: [u8; 32]) -> u32 {
 }
 
 #[inline(always)]
-/// Computes the hash of the given inputs using Keccak256.
+/// Computes the hash of the given inputs using BLAKE3.
 fn compute_hash(inputs: &[&[u8]]) -> [u8; 32] {
     #[cfg(feature = "solana")]
     {
-        keccak::hashv(inputs).to_bytes()
+        solana_program::blake3::hashv(inputs).to_bytes()
     }
     #[cfg(not(feature = "solana"))]
     {
-        let mut hasher = Keccak256::new();
+        let mut hasher = blake3::Hasher::new();
         for input in inputs {
             hasher.update(input);
         }
@@ -227,6 +234,45 @@ mod tests {
 
     // Reasonable difficulty for testing
     const TEST_DIFFICULTY: u32 = 1;
+
+    #[test]
+    fn test_solve_difficulty_zero() {
+        let mut rng = rand::thread_rng();
+        let mut pubkey = [0u8; 32];
+        let mut data = [0u8; 128];
+        rng.fill_bytes(&mut pubkey);
+        rng.fill_bytes(&mut data);
+
+        let solution = solve(&pubkey, &data, 0).expect("Failed to find solution with difficulty 0");
+
+        // Check that nonces contain the input data
+        assert_eq!(solution.nonces, data);
+        // Check that bump is zero
+        assert_eq!(solution.bump, [0; 8]);
+        // Check that seeds are zero
+        assert_eq!(solution.seeds, [0; 16]);
+        // Verify the solution
+        assert!(verify(&pubkey, &data, &solution, 0));
+    }
+
+    #[test]
+    fn test_solve_nonzero_difficulty_bump() {
+        let mut rng = rand::thread_rng();
+        let mut pubkey = [0u8; 32];
+        let mut data = [0u8; 128];
+        rng.fill_bytes(&mut pubkey);
+        rng.fill_bytes(&mut data);
+
+        let solution = solve(&pubkey, &data, TEST_DIFFICULTY).expect("Failed to find solution");
+
+        // Check that bump is not zero
+        assert_ne!(solution.bump, [0; 8], "Bump should not be zero for non-zero difficulty");
+        // Convert bump bytes to u64 for additional check
+        let bump_value = u64::from_le_bytes(solution.bump);
+        assert!(bump_value >= 1, "Bump should be at least 1 for non-zero difficulty");
+        // Verify the solution
+        assert!(verify(&pubkey, &data, &solution, TEST_DIFFICULTY));
+    }
 
     #[test]
     fn test_solve_and_verify() {

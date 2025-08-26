@@ -1,6 +1,6 @@
 [package]
 name = "packx"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2021"
 
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ keywords = ["solana", "crypto", "mining"]
 documentation = "https://docs.rs/packx"
 
 [dependencies]
-sha3 = "0.10.8"
+blake3 = "1.8.2"
 bytemuck = { version = "1.14", features = ["derive"] }
 solana-program = { version = ">=2.1.0", optional = true }
 
