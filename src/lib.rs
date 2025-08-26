@@ -39,7 +39,12 @@ impl Solution {
 }
 
 /// Reconstructs the data from the solution and public key.
+/// If bump is zero, return nonces directly (for difficulty == 0).
 pub fn unpack(pubkey: &[u8; 32], solution: &Solution) -> [u8; 128] {
+    if solution.bump == [0; 8] {
+        return solution.nonces; // Direct return of nonces for difficulty == 0
+    }
+
     let mut data = [0u8; 128];
     for group_idx in 0..16 {
         let chunk_start = group_idx * 8;
@@ -104,11 +109,12 @@ pub fn solve_with_seed(
 /// If difficulty is 0, store data directly in nonces with bump and seeds set to zero.
 pub fn solve(pubkey: &[u8; 32], data: &[u8; 128], difficulty: u32) -> Option<Solution> {
     if difficulty == 0 {
-        return Some(Solution {
+        let solution = Solution {
             bump: [0; 8],    // Set bump to zero (u64: 0)
             seeds: [0; 16],  // Set seeds to zero
             nonces: *data,   // Store data directly in nonces
-        });
+        };
+        return Some(solution);
     }
 
     let mut bump = 1u64; // Start at bump = 1 for non-zero difficulty
@@ -253,6 +259,8 @@ mod tests {
         assert_eq!(solution.seeds, [0; 16]);
         // Verify the solution
         assert!(verify(&pubkey, &data, &solution, 0));
+        // Check that unpack returns nonces directly
+        assert_eq!(unpack(&pubkey, &solution), data);
     }
 
     #[test]
@@ -272,6 +280,20 @@ mod tests {
         assert!(bump_value >= 1, "Bump should be at least 1 for non-zero difficulty");
         // Verify the solution
         assert!(verify(&pubkey, &data, &solution, TEST_DIFFICULTY));
+    }
+
+    #[test]
+    fn test_unpack_nonzero_bump() {
+        let mut rng = rand::thread_rng();
+        let mut pubkey = [0u8; 32];
+        let mut data = [0u8; 128];
+        rng.fill_bytes(&mut pubkey);
+        rng.fill_bytes(&mut data);
+
+        let solution = solve(&pubkey, &data, TEST_DIFFICULTY).expect("Failed to find solution");
+        let reconstructed_data = unpack(&pubkey, &solution);
+
+        assert_eq!(reconstructed_data, data);
     }
 
     #[test]
