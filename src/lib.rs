@@ -43,16 +43,18 @@ impl Solution {
     }
 }
 
-/// Per-bump table: which targets each seed can produce, and the first nonce.
+/// Per-bump table allocated on the heap. Large fields are boxed slices.
 #[repr(C)]
 pub struct SeedTable {
-    pub nonces: [[u8; 256]; 256],  // [seed][target] -> nonce
-    pub present: [[u8; 32]; 256],  // [seed] -> 256-bit bitset of achievable targets
+    /// [seed][target] -> nonce
+    pub nonces: Box<[[u8; 256]]>,   // len = 256
+    /// [seed] -> 256-bit bitset of achievable targets
+    pub present: Box<[[u8; 32]]>,   // len = 256
 }
 
 /// All bumps for one pubkey (heap allocated).
 pub struct SolverMemory {
-    pub tables: Box<[SeedTable]>,
+    pub tables: Box<[Box<SeedTable>]>,
 }
 
 #[inline(always)]
@@ -124,16 +126,17 @@ pub fn deserialize(bytes_in: &[u8; SOLUTION_SIZE]) -> Solution {
     s
 }
 
-/// Build one bump table. About 72 KiB per bump.
-pub fn build_one_bump(pubkey: &[u8; 32], bump: u8) -> SeedTable {
-    let mut table = SeedTable {
-        nonces: [[0u8; 256]; 256],
-        present: [[0u8; 32]; 256],
-    };
+/// Build one bump table on the heap. No large stack locals.
+pub fn build_one_bump(pubkey: &[u8; 32], bump: u8) -> Box<SeedTable> {
+    // Use boxed slices so the large storage is on the heap.
+    let mut table = Box::new(SeedTable {
+        nonces: vec![[0u8; 256]; 256].into_boxed_slice(),
+        present: vec![[0u8; 32]; 256].into_boxed_slice(),
+    });
 
     for seed in 0u8..=u8::MAX {
-        let present_row = &mut table.present[seed as usize];
-        let nonces_row = &mut table.nonces[seed as usize];
+        let present_row: &mut [u8; 32] = &mut table.present[seed as usize];
+        let nonces_row: &mut [u8; 256] = &mut table.nonces[seed as usize];
 
         for nonce in 0u8..=u8::MAX {
             let t = h0(pubkey, bump, seed, nonce);
@@ -147,9 +150,9 @@ pub fn build_one_bump(pubkey: &[u8; 32], bump: u8) -> SeedTable {
     table
 }
 
-/// Build all 256 bump tables. About 18 MiB total.
+/// Build all 256 bump tables on the heap.
 pub fn build_memory(pubkey: &[u8; 32]) -> SolverMemory {
-    let mut vec_tables = Vec::with_capacity(256);
+    let mut vec_tables: Vec<Box<SeedTable>> = Vec::with_capacity(256);
     for bump in 0u8..=u8::MAX {
         vec_tables.push(build_one_bump(pubkey, bump));
     }
@@ -158,7 +161,7 @@ pub fn build_memory(pubkey: &[u8; 32]) -> SolverMemory {
     }
 }
 
-/// Seed that can cover a group, paired with the 8 nonces to use.
+/// Seed that can cover a group, with the 8 nonces to use.
 #[derive(Clone, Copy)]
 struct SeedCandidate {
     seed: u8,
@@ -300,7 +303,7 @@ pub fn solve_with_memory(
     difficulty: u32,
 ) -> Option<Solution> {
     for bump in 0u8..=u8::MAX {
-        let table = &mem.tables[bump as usize];
+        let table: &SeedTable = &mem.tables[bump as usize];
         if let Some(solution) = solve_one_bump(data, bump, table, difficulty) {
             return Some(solution);
         }
@@ -308,8 +311,7 @@ pub fn solve_with_memory(
     None
 }
 
-/// Solve by first building the precompute for this pubkey, then searching. You may want to use
-/// solve_with_memory to avoid rebuilding it for each call.
+/// Solve by first building the precompute for this pubkey, then searching.
 pub fn solve(
     pubkey: &[u8; 32],
     data: &[u8; 128],
